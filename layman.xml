@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE repositories SYSTEM "/dtd/repositories.dtd">
+<repositories xmlns="" version="1.0">
+	<repo quality="experimental" status="unofficial">
+		<name><![CDATA[jsrdbg]]></name>
+		<description lang="en"><![CDATA[JSRDBG Gentoo Overlay]]></description>
+		<homepage>https://github.com/swojtasiak/jsrdbg-portage</homepage>
+		<owner type="person">
+			<name><![CDATA[Sławomir Wojtasiak]]></name>
+			<email>slawomir@wojtasiak.com</email>
+		</owner>
+		<source type="git">git://github.com/swojtasiak/jsrdbg-portage.git</source>
+		<source type="git">https://github.com/swojtasiak/jsrdbg-portage.git</source>
+		<feed>https://github.com/swojtasiak/jsrdbg-portage/commits/master.atom</feed>
+	</repo>
+</repositories>
