@@ -1,0 +1,177 @@
+From 4a3b9e295f89051086216055a41a343f4371e939 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?S=C5=82awomir=20Wojtasiak?=
+ <slawomir.wojtasiak@swksoftware.pl>
+Date: Sun, 12 Apr 2015 17:43:28 +0200
+Subject: [PATCH] gnome-shell - jsrdbg integration.
+
+---
+ configure.ac       |  1 +
+ src/Makefile.am    |  4 +--
+ src/shell-global.c | 96 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 99 insertions(+), 2 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 03839c7..d20395d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -121,6 +121,7 @@ PKG_CHECK_MODULES(TRAY, gtk+-3.0)
+ PKG_CHECK_MODULES(GVC, libpulse >= $PULSE_MIN_VERS libpulse-mainloop-glib gobject-2.0)
+ PKG_CHECK_MODULES(DESKTOP_SCHEMAS, gsettings-desktop-schemas >= 3.7.4)
+ PKG_CHECK_MODULES(CARIBOU, caribou-1.0 >= 0.4.8)
++PKG_CHECK_MODULES(JSRDBG, libjsrdbg >= 0.0.2)
+ 
+ AC_ARG_ENABLE(browser-plugin,
+               [AS_HELP_STRING([--enable-browser-plugin],
+diff --git a/src/Makefile.am b/src/Makefile.am
+index c8fd46f..94ce3e9 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -315,8 +315,8 @@ libgnome_shell_base_la_LIBADD = $(libgnome_shell_libadd)
+ libgnome_shell_base_la_CPPFLAGS = $(gnome_shell_cflags)
+ 
+ libgnome_shell_la_LDFLAGS = $(libgnome_shell_ldflags)
+-libgnome_shell_la_LIBADD = $(GNOME_SHELL_LIBS) $(MUTTER_LIBS) $(BLUETOOTH_LIBS) libgnome-shell-base.la
+-libgnome_shell_la_CPPFLAGS = $(MUTTER_CFLAGS) $(gnome_shell_cflags)
++libgnome_shell_la_LIBADD = $(GNOME_SHELL_LIBS) $(MUTTER_LIBS) $(JSRDBG_LIBS) $(BLUETOOTH_LIBS) libgnome-shell-base.la
++libgnome_shell_la_CPPFLAGS = $(MUTTER_CFLAGS) $(JSRDBG_CFLAGS) $(gnome_shell_cflags)
+ 
+ ShellMenu-0.1.gir: libgnome-shell-menu.la
+ ShellMenu_0_1_gir_INCLUDES = Gio-2.0
+diff --git a/src/shell-global.c b/src/shell-global.c
+index d90ceaf..b861968 100644
+--- a/src/shell-global.c
++++ b/src/shell-global.c
+@@ -64,6 +64,7 @@ struct _ShellGlobal {
+   XserverRegion input_region;
+ 
+   GjsContext *js_context;
++  GjsDebugger *js_debugger;
+   MetaPlugin *plugin;
+   ShellWM *wm;
+   GSettings *settings;
+@@ -125,6 +126,95 @@ G_DEFINE_TYPE(ShellGlobal, shell_global, G_TYPE_OBJECT);
+ 
+ static guint shell_global_signals [LAST_SIGNAL] = { 0 };
+ 
++gboolean
++shell_global_is_env_set(const char* env)
++{
++  gboolean ret = FALSE;
++  gint64 val_int;
++  const char* env_val = g_getenv(env);
++  if( env_val ) {
++      val_int = g_ascii_strtoll( env_val, NULL, 0 );
++      if( val_int ) {
++          ret = TRUE;
++      }
++  }
++  return ret;
++}
++
++void
++shell_global_start_debugger(ShellGlobal *global)
++{
++
++  const char* env_dbg_host;
++  const char* env_dbg_port;
++  gint64 port = 8090;
++  GError *error = NULL;
++
++  if (shell_global_is_env_set("GNOME_SHELL_DBG"))
++    {
++
++      env_dbg_host = g_getenv("GNOME_SHELL_DBG_HOST");
++      env_dbg_port = g_getenv("GNOME_SHELL_DBG_PORT");
++
++      if (!env_dbg_host)
++        {
++          env_dbg_host = "";
++        }
++
++      if (env_dbg_port)
++        {
++          port = g_ascii_strtoll(env_dbg_port, NULL, 0);
++        }
++
++      global->js_debugger = (GjsDebugger*) g_object_new(GJS_TYPE_DEBUGGER,
++                                                        "host", env_dbg_host,
++                                                        "port", port,
++                                                        NULL);
++
++      GjsDebuggerEngineOptions options;
++      options.continuation = shell_global_is_env_set ("GNOME_SHELL_DBG_CONTINUE");
++      options.suspend = shell_global_is_env_set ("GNOME_SHELL_DBG_SUSPEND");
++      options.source_displacement = -1;
++
++      if (!gjs_debugger_install (global->js_debugger, global->js_context, "gnome-shell-global", &options, &error))
++        {
++          g_printerr ("Failed to install debugger for JSContext: %s\n", error->message);
++          g_clear_error (&error);
++          g_object_unref (global->js_debugger);
++          global->js_debugger = NULL;
++          return;
++        }
++
++      if (!gjs_debugger_start (global->js_debugger, &error))
++        {
++          gjs_debugger_uninstall (global->js_debugger, global->js_context, &error );
++          g_printerr ("Failed to start JS debugger: %s\n", error->message);
++          g_clear_error (&error);
++          g_object_unref (global->js_debugger);
++          global->js_debugger = NULL;
++          return;
++        }
++
++    }
++
++}
++
++void
++shell_global_stop_debugger(ShellGlobal *global)
++{
++
++  GError *error = NULL;
++
++  if (global->js_debugger)
++    {
++      gjs_debugger_stop(global->js_debugger, &error);
++      gjs_debugger_uninstall(global->js_debugger, global->js_context, &error);
++      g_object_unref(global->js_debugger);
++      global->js_debugger = NULL;
++    }
++
++}
++
+ static void
+ shell_global_set_property(GObject         *object,
+                           guint            prop_id,
+@@ -237,6 +327,8 @@ shell_global_init (ShellGlobal *global)
+   char *path;
+   const char *byteorder_string;
+ 
++  global->js_debugger = NULL;
++
+   if (!datadir)
+     datadir = GNOME_SHELL_DATADIR;
+   global->datadir = datadir;
+@@ -324,6 +416,8 @@ shell_global_init (ShellGlobal *global)
+                                      "search-path", search_path,
+                                      NULL);
+ 
++  shell_global_start_debugger( global );
++
+   g_strfreev (search_path);
+ }
+ 
+@@ -332,6 +426,8 @@ shell_global_finalize (GObject *object)
+ {
+   ShellGlobal *global = SHELL_GLOBAL (object);
+ 
++  shell_global_stop_debugger( global );
++
+   g_object_unref (global->js_context);
+   g_object_unref (global->settings);
+ 
+-- 
+2.0.5
+
