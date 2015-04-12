@@ -3,7 +3,7 @@ JavaScript Remote Debugger Overlay
 
 Overlay for JSRDbg for Gentoo/Funtoo systems.
 
-Binary packages are available [here](https://github.com/swojtasiak/jsrdbg-archive).
+Source packages are available [here](https://github.com/swojtasiak/jsrdbg-archive).
 
 ## Layman
 
