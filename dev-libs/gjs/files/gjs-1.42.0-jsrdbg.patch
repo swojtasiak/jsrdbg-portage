@@ -1,0 +1,623 @@
+From 03b6d5e1198237bdd0b1aa0a77ef458819b3cc13 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?S=C5=82awomir=20Wojtasiak?= <slawomir@wojtasiak.com>
+Date: Sun, 12 Apr 2015 11:28:53 +0200
+Subject: [PATCH] gjs - jsrdbg integration
+
+---
+ Makefile.am             |   6 +-
+ configure.ac            |   1 +
+ gjs-1.0.pc.in           |   2 +-
+ gjs-internals-1.0.pc.in |   2 +-
+ gjs/console.cpp         |  53 +++++++++-
+ gjs/context.cpp         |   7 ++
+ gjs/context.h           |   2 +
+ gjs/debugger.cpp        | 275 ++++++++++++++++++++++++++++++++++++++++++++++++
+ gjs/debugger.h          |  72 +++++++++++++
+ gjs/gjs.h               |   1 +
+ gjs/jsapi-util.cpp      |  11 +-
+ 11 files changed, 419 insertions(+), 13 deletions(-)
+ create mode 100644 gjs/debugger.cpp
+ create mode 100644 gjs/debugger.h
+
+diff --git a/Makefile.am b/Makefile.am
+index 4dbd318..5e098ca 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -27,6 +27,7 @@ gjs_module_includedir = $(includedir)/gjs-1.0
+ ########################################################################
+ nobase_gjs_public_include_HEADERS =	\
+ 	gjs/context.h		\
++	gjs/debugger.h	\
+ 	gjs/gjs.h
+ 
+ nobase_gjs_module_include_HEADERS =	\
+@@ -89,6 +90,7 @@ lib_LTLIBRARIES += libgjs.la
+ libgjs_la_CPPFLAGS =		\
+ 	$(AM_CPPFLAGS)		\
+ 	$(GJS_CFLAGS)	\
++	$(JSRDBG_CFLAGS)	\
+ 	$(gjs_directory_defines)\
+ 	-I$(top_srcdir)/gi	\
+ 	-DGJS_COMPILATION
+@@ -100,7 +102,8 @@ libgjs_la_LDFLAGS = 		\
+ 	-no-undefined \
+ 	-rdynamic
+ libgjs_la_LIBADD = 		\
+-	$(GJS_LIBS)
++	$(GJS_LIBS)		\
++	$(JSRDBG_LIBS)
+ 
+ if ENABLE_GTK
+ libgjs_la_CPPFLAGS += $(GJS_GTK_CFLAGS)
+@@ -110,6 +113,7 @@ endif
+ libgjs_la_SOURCES =		\
+ 	gjs/byteArray.cpp		\
+ 	gjs/context.cpp		\
++	gjs/debugger.cpp	\
+ 	gjs/importer.cpp		\
+ 	gjs/gi.h		\
+ 	gjs/gi.cpp		\
+diff --git a/configure.ac b/configure.ac
+index 6efd58d..ede0658 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -86,6 +86,7 @@ PKG_CHECK_MODULES([GOBJECT], [gobject-2.0 >= glib_required_version])
+ PKG_CHECK_MODULES([GJS], [$gjs_packages])
+ PKG_CHECK_MODULES([GJS_GDBUS], [$gjs_gdbus_packages])
+ PKG_CHECK_MODULES([GJSTESTS], [$gjstests_packages])
++PKG_CHECK_MODULES([JSRDBG], [libjsrdbg >= 0.0.2])
+ 
+ # Optional cairo dep (enabled by default)
+ AC_ARG_WITH(cairo,
+diff --git a/gjs-1.0.pc.in b/gjs-1.0.pc.in
+index 8a5d47b..d702f57 100644
+--- a/gjs-1.0.pc.in
++++ b/gjs-1.0.pc.in
+@@ -10,7 +10,7 @@ gjs_console=${bindir}/gjs-console
+ 
+ Cflags: -I${includedir}/gjs-1.0
+ Requires: gobject-2.0
+-Requires.private: gobject-introspection-1.0 mozjs-24
++Requires.private: gobject-introspection-1.0 mozjs-24 libjsrdbg
+ Libs: -L${libdir} -lgjs
+ 
+ Name: gjs-1.0
+diff --git a/gjs-internals-1.0.pc.in b/gjs-internals-1.0.pc.in
+index 4d88d82..655d3b0 100644
+--- a/gjs-internals-1.0.pc.in
++++ b/gjs-internals-1.0.pc.in
+@@ -9,7 +9,7 @@ datadir=@datadir@
+ jsdir=@gjsjsdir@
+ 
+ Cflags: -I${includedir}/gjs-1.0
+-Requires: gjs-1.0 gobject-introspection-1.0 mozjs-24
++Requires: gjs-1.0 gobject-introspection-1.0 mozjs-24 libjsrdbg
+ 
+ Name: gjs-internals-1.0
+ Description: Internal API for gjs (for modules and embedders); uses mozjs
+diff --git a/gjs/console.cpp b/gjs/console.cpp
+index 411a753..d3bf0f3 100644
+--- a/gjs/console.cpp
++++ b/gjs/console.cpp
+@@ -28,7 +28,13 @@
+ 
+ #include <gjs/gjs.h>
+ #include <gjs/coverage.h>
++#include <gjs/debugger.h>
+ 
++static gboolean debugger_enabled = FALSE;
++static gboolean debugger_suspended = FALSE;
++static gboolean debugger_continuation = FALSE;
++static char *debugger_host = NULL;
++static gint debugger_port = 8089;
+ static char **include_path = NULL;
+ static char **coverage_paths = NULL;
+ static char *coverage_output_path = NULL;
+@@ -39,6 +45,11 @@ static GOptionEntry entries[] = {
+     { "coverage-path", 'C', 0, G_OPTION_ARG_STRING_ARRAY, &coverage_paths, "Add the filename FILE to the list of files to generate coverage info for", "FILE" },
+     { "coverage-output", 0, 0, G_OPTION_ARG_STRING, &coverage_output_path, "Write coverage output to a directory DIR. This option is mandatory when using --coverage-path", "DIR", },
+     { "include-path", 'I', 0, G_OPTION_ARG_STRING_ARRAY, &include_path, "Add the directory DIR to the list of directories to search for js files.", "DIR" },
++    { "debugger", 'D', 0, G_OPTION_ARG_NONE, &debugger_enabled, "Enables the JS remote debugger.", NULL },
++    { "debugger-suspended", 'S', 0, G_OPTION_ARG_NONE, &debugger_suspended, "Starts debugger in suspended state.", NULL },
++    { "debugger-continuation", 'R', 0, G_OPTION_ARG_NONE, &debugger_continuation, "Continues execution when all clients have disconnected.", NULL },
++    { "debugger-host", 'H', 0, G_OPTION_ARG_STRING, &debugger_host, "A host the debugger should be bound to.", NULL },
++    { "debugger-port", 'P', 0, G_OPTION_ARG_INT, &debugger_port, "A post the debugger should be bound to.", NULL },
+     { NULL }
+ };
+ 
+@@ -62,6 +73,7 @@ main(int argc, char **argv)
+     GOptionContext *context;
+     GError *error = NULL;
+     GjsContext *js_context;
++    GjsDebugger *js_debugger = NULL;
+     GjsCoverage *coverage = NULL;
+     char *script;
+     const char *filename;
+@@ -117,6 +129,37 @@ main(int argc, char **argv)
+                                             "program-name", program_name,
+                                             NULL);
+ 
++    if( debugger_enabled ) {
++
++        js_debugger = (GjsDebugger*) g_object_new(GJS_TYPE_DEBUGGER,
++                                                  "host", debugger_host,
++                                                  "port", debugger_port,
++                                                  NULL);
++
++        GjsDebuggerEngineOptions options;
++        options.continuation = debugger_continuation;
++        options.suspend = debugger_suspended;
++        options.source_displacement = -1;
++
++        if( !gjs_debugger_install( js_debugger, js_context, "gjs-console", &options, &error ) ) {
++            g_printerr("Failed to install debugger for JSContext: %s\n", error->message);
++            g_clear_error(&error);
++            goto out;
++        }
++
++        if( !gjs_debugger_start( js_debugger, &error ) ) {
++            g_printerr("Failed to start JS debugger: %s\n", error->message);
++            g_clear_error(&error);
++            goto out;
++        }
++
++        g_print("Debugger is listening on port: %d\n", debugger_port);
++        if( debugger_suspended ) {
++            g_print("Application is suspended.\n");
++        }
++
++    }
++
+     if (coverage_paths) {
+         if (!coverage_output_path)
+             g_error("--coverage-output is required when taking coverage statistics");
+@@ -148,8 +191,14 @@ main(int argc, char **argv)
+ 
+     /* Probably doesn't make sense to write statistics on failure */
+     if (coverage && code == 0)
+-        gjs_coverage_write_statistics(coverage,
+-                                      coverage_output_path);
++         gjs_coverage_write_statistics(coverage,
++                                       coverage_output_path);
++
++    if( debugger_enabled ) {
++        gjs_debugger_stop( js_debugger, &error );
++        gjs_debugger_uninstall( js_debugger, js_context, &error );
++        g_object_unref(js_debugger);
++    }
+  
+     g_object_unref(js_context);
+     g_free(script);
+diff --git a/gjs/context.cpp b/gjs/context.cpp
+index ae67489..87928dd 100644
+--- a/gjs/context.cpp
++++ b/gjs/context.cpp
+@@ -628,6 +628,13 @@ gjs_context_get_native_context (GjsContext *js_context)
+     return js_context->context;
+ }
+ 
++void*
++gjs_context_get_native_global (GjsContext *js_context)
++{
++    g_return_val_if_fail(GJS_IS_CONTEXT(js_context), NULL);
++    return js_context->global;
++}
++
+ gboolean
+ gjs_context_eval(GjsContext   *js_context,
+                  const char   *script,
+diff --git a/gjs/context.h b/gjs/context.h
+index ccd8bc6..394ae22 100644
+--- a/gjs/context.h
++++ b/gjs/context.h
+@@ -69,6 +69,8 @@ void            gjs_context_make_current         (GjsContext *js_context);
+ 
+ void*           gjs_context_get_native_context   (GjsContext *js_context);
+ 
++void*           gjs_context_get_native_global    (GjsContext *js_context);
++
+ void            gjs_context_print_stack_stderr    (GjsContext *js_context);
+ 
+ void            gjs_context_maybe_gc              (GjsContext  *context);
+diff --git a/gjs/debugger.cpp b/gjs/debugger.cpp
+new file mode 100644
+index 0000000..c6e8309
+--- /dev/null
++++ b/gjs/debugger.cpp
+@@ -0,0 +1,275 @@
++/*
++ * Copyright © 2015 Slawomir Wojtasiak
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ *
++ * Authored By: Slawomir Wojtasiak <slawomir@wojtasiak.com>
++ */
++
++#include "debugger.h"
++
++#include <gio/gio.h>
++
++#include <jsrdbg/jsrdbg.h>
++
++#include "util/error.h"
++
++static void gjs_debugger_finalize(GObject *object);
++static void gjs_debugger_constructed(GObject *object);
++static void gjs_debugger_get_property (GObject *object, guint prop_id, GValue *value, GParamSpec *pspec);
++static void gjs_debugger_set_property (GObject *object, guint prop_id, const GValue *value, GParamSpec *pspec);
++
++using namespace JSR;
++
++struct _GjsDebugger {
++    GObject parent;
++    gchar*   host;
++    gint     port;
++    JSRemoteDebugger *debugger;
++};
++
++struct _GjsDebuggerClass {
++    GObjectClass parent;
++};
++
++G_DEFINE_TYPE(GjsDebugger, gjs_debugger, G_TYPE_OBJECT);
++
++enum {
++    PROP_DBG_0,
++    PROP_DBG_HOST,
++    PROP_DBG_PORT,
++};
++
++GjsDebugger*
++gjs_debugger_new(void)
++{
++    return static_cast<GjsDebugger*>( g_object_new (GJS_TYPE_DEBUGGER, NULL) );
++}
++
++static void
++gjs_debugger_init(GjsDebugger *js_debugger)
++{
++    js_debugger->host = NULL;
++    js_debugger->port = JSR_DEFAULT_TCP_PORT;
++    js_debugger->debugger = NULL;
++}
++
++static void
++gjs_debugger_class_init(GjsDebuggerClass *klass)
++{
++    GObjectClass *object_class = G_OBJECT_CLASS (klass);
++    GParamSpec *pspec;
++
++    object_class->finalize = gjs_debugger_finalize;
++    object_class->constructed = gjs_debugger_constructed;
++    object_class->get_property = gjs_debugger_get_property;
++    object_class->set_property = gjs_debugger_set_property;
++
++    pspec = g_param_spec_string("host", "Server host.", "Host/IP where server has to be bind to.",
++                JSR_DEFAULT_TCP_BINDING_IP, (GParamFlags) (G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
++
++    g_object_class_install_property(object_class, PROP_DBG_HOST, pspec);
++
++    pspec = g_param_spec_int("port", "Server port.", "TCP/IP port number for debugger server.",
++                1, 0xFFFF, JSR_DEFAULT_TCP_PORT,(GParamFlags) (G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY));
++
++    g_object_class_install_property(object_class, PROP_DBG_PORT, pspec);
++
++}
++
++static void
++gjs_debugger_finalize(GObject *object)
++{
++    GjsDebugger *js_debugger;
++
++    js_debugger = GJS_DEBUGGER(object);
++
++    if( js_debugger->debugger != NULL ) {
++        delete js_debugger->debugger;
++        js_debugger->debugger = NULL;
++    }
++
++    if (js_debugger->host != NULL) {
++        g_free(js_debugger->host);
++        js_debugger->host = NULL;
++    }
++
++    G_OBJECT_CLASS(gjs_debugger_parent_class)->finalize(object);
++}
++
++static void
++gjs_debugger_constructed(GObject *object)
++{
++    GjsDebugger *js_debugger = GJS_DEBUGGER(object);
++    int i;
++
++    G_OBJECT_CLASS(gjs_debugger_parent_class)->constructed(object);
++
++    /* Creates debugger */
++    JSRemoteDebuggerCfg cfg;
++    cfg.setProtocol( JSRemoteDebuggerCfg::PROTOCOL_TCP_IP );
++    cfg.setTcpHost( js_debugger->host );
++    cfg.setTcpPort( js_debugger->port );
++
++    js_debugger->debugger = new JSRemoteDebugger( cfg );
++
++}
++
++static void
++gjs_debugger_get_property (GObject     *object,
++                          guint        prop_id,
++                          GValue      *value,
++                          GParamSpec  *pspec)
++{
++    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++}
++
++static void
++gjs_debugger_set_property (GObject      *object,
++                          guint         prop_id,
++                          const GValue *value,
++                          GParamSpec   *pspec)
++{
++    GjsDebugger *js_debugger;
++
++    js_debugger = GJS_DEBUGGER (object);
++
++    switch (prop_id) {
++    case PROP_DBG_HOST:
++        js_debugger->host = g_value_dup_string(value);
++        break;
++    case PROP_DBG_PORT:
++        js_debugger->port = g_value_get_int(value);
++        break;
++    default:
++        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++        break;
++    }
++
++}
++
++gboolean
++gjs_debugger_start (GjsDebugger *js_debugger,
++                    GError **error)
++{
++    int rc = js_debugger->debugger->start();
++    if( rc ) {
++        if( rc == JSR_ERROR_PORT_IN_USE || rc == JSR_ERROR_CANNOT_BIND_SOCKET ) {
++            g_set_error(error, GJS_ERROR, rc, "Port is already in use.");
++        } else {
++            g_set_error(error, GJS_ERROR, rc, "Cannot start debugger.");
++        }
++        return FALSE;
++    }
++    return TRUE;
++}
++
++gboolean
++gjs_debugger_stop (GjsDebugger *js_debugger,
++                   GError **error)
++{
++    int rc = js_debugger->debugger->stop();
++    if( rc ) {
++        g_set_error(error, GJS_ERROR, rc, "Cannot stop debugger.");
++        return FALSE;
++    }
++    return TRUE;
++}
++
++gboolean
++gjs_debugger_install (GjsDebugger *js_debugger,
++                      GjsContext *ctx,
++                      const gchar *name,
++                      GjsDebuggerEngineOptions *options,
++                      GError **error)
++{
++
++    int rc;
++
++    JSContext *context = static_cast<JSContext*>( gjs_context_get_native_context( ctx ) );
++    if( !context ) {
++        g_set_error(error, GJS_ERROR, GJS_ERROR_FAILED, "Native JS context not found.");
++        return FALSE;
++    }
++
++    JSObject *global = static_cast<JSObject*>( gjs_context_get_native_global( ctx ) );
++    if( !global ) {
++        g_set_error(error, GJS_ERROR, GJS_ERROR_FAILED, "Native JS global not found.");
++        return FALSE;
++    }
++
++    JSAutoCompartment compartment(context, global);
++    JSAutoRequest request(context);
++    JS::RootedObject jsGlobal( context, global );
++
++    JSR::JSDbgEngineOptions engineOptions;
++    if( options->suspend ) {
++        engineOptions.suspended();
++    }
++    if( options->continuation ) {
++        engineOptions.continueWhenNoConnections();
++    }
++    engineOptions.setSourceCodeDisplacement(options->source_displacement);
++
++    if( ( rc = js_debugger->debugger->install( context, name, engineOptions ) ) ) {
++        g_set_error(error, GJS_ERROR, rc, "Cannot install debugger for JSContext.");
++        return FALSE;
++    }
++
++    if( ( rc = js_debugger->debugger->addDebuggee( context, jsGlobal ) ) ) {
++        js_debugger->debugger->uninstall( context );
++        g_set_error(error, GJS_ERROR, rc, "Cannot add global object to the debugger.");
++        return FALSE;
++    }
++
++    return TRUE;
++}
++
++gboolean
++gjs_debugger_uninstall (GjsDebugger *js_debugger,
++                        GjsContext *ctx,
++                        GError **error)
++{
++
++    int rc;
++
++    JSContext *context = static_cast<JSContext*>( gjs_context_get_native_context( ctx ) );
++    if( !context ) {
++        g_set_error(error, GJS_ERROR, GJS_ERROR_FAILED, "Native JS context not found.");
++        return FALSE;
++    }
++
++    JSObject *global = static_cast<JSObject*>( gjs_context_get_native_global( ctx ) );
++    if( !global ) {
++        g_set_error(error, GJS_ERROR, GJS_ERROR_FAILED, "Native JS global not found.");
++        return FALSE;
++    }
++
++    JSAutoCompartment compartment(context, global);
++    JSAutoRequest request(context);
++    JS::RootedObject jsGlobal( context, global );
++
++    if( ( rc = js_debugger->debugger->removeDebuggee( context, jsGlobal ) ) ) {
++        g_set_error(error, GJS_ERROR, rc, "Cannot remove debugger.");
++        return FALSE;
++    }
++
++    if( ( rc = js_debugger->debugger->uninstall( context ) ) ) {
++        g_set_error(error, GJS_ERROR, rc, "Cannot uninstall debugger.");
++        return FALSE;
++    }
++
++    return TRUE;
++}
+diff --git a/gjs/debugger.h b/gjs/debugger.h
+new file mode 100644
+index 0000000..839fb41
+--- /dev/null
++++ b/gjs/debugger.h
+@@ -0,0 +1,72 @@
++/*
++ * Copyright © 2015 Slawomir Wojtasiak
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software Foundation,
++ * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
++ *
++ * Authored By: Slawomir Wojtasiak <slawomir@wojtasiak.com>
++ */
++
++#ifndef __GJS_JS_DEBUGGER_H__
++#define __GJS_JS_DEBUGGER_H__
++
++#if !defined (__GJS_GJS_H__) && !defined (GJS_COMPILATION)
++#error "Only <gjs/gjs.h> can be included directly."
++#endif
++
++#include <glib-object.h>
++
++#include "context.h"
++
++G_BEGIN_DECLS
++
++typedef struct _GjsDebugger      GjsDebugger;
++typedef struct _GjsDebuggerClass GjsDebuggerClass;
++
++#define GJS_TYPE_DEBUGGER             (gjs_debugger_get_type ())
++#define GJS_DEBUGGER(object)          (G_TYPE_CHECK_INSTANCE_CAST ((object), GJS_TYPE_DEBUGGER, GjsDebugger))
++#define GJS_DEBUGGER_CLASS(klass)     (G_TYPE_CHECK_CLASS_CAST ((klass), GJS_TYPE_DEBUGGER, GjsDebuggerClass))
++#define GJS_IS_DEBUGGER(object)       (G_TYPE_CHECK_INSTANCE_TYPE ((object), GJS_TYPE_DEBUGGER))
++#define GJS_IS_DEBUGGER_CLASS(klass)  (G_TYPE_CHECK_CLASS_TYPE ((klass), GJS_TYPE_DEBUGGER))
++#define GJS_DEBUGGER_GET_CLASS(obj)   (G_TYPE_INSTANCE_GET_CLASS ((obj), GJS_TYPE_DEBUGGER, GjsDebuggerClass))
++
++typedef struct GjsDebuggerEngineOptions {
++    gboolean suspend;
++    gboolean continuation;
++    gint source_displacement;
++} GjsDebuggerEngineOptions;
++
++GType           gjs_debugger_get_type            (void) G_GNUC_CONST;
++
++GjsDebugger*    gjs_debugger_new                 (void);
++
++gboolean        gjs_debugger_start               (GjsDebugger *js_debugger,
++                                                  GError **error);
++
++gboolean        gjs_debugger_stop                (GjsDebugger *js_debugger,
++                                                  GError **error);
++
++gboolean        gjs_debugger_install             (GjsDebugger *js_debugger,
++                                                  GjsContext *ctx,
++                                                  const gchar *name,
++                                                  GjsDebuggerEngineOptions *options,
++                                                  GError **error);
++
++gboolean        gjs_debugger_uninstall           (GjsDebugger *js_debugger,
++                                                  GjsContext *ctx,
++                                                  GError **error);
++
++G_END_DECLS
++
++#endif /* __GJS_JS_DEBUGGER_H__ */
+diff --git a/gjs/gjs.h b/gjs/gjs.h
+index b2a32f2..779b7c4 100644
+--- a/gjs/gjs.h
++++ b/gjs/gjs.h
+@@ -25,5 +25,6 @@
+ #define __GJS_GJS_H__
+ 
+ #include <gjs/context.h>
++#include <gjs/debugger.h>
+ 
+ #endif /* __GJS_GJS_H__ */
+diff --git a/gjs/jsapi-util.cpp b/gjs/jsapi-util.cpp
+index 9cb7929..fae4623 100644
+--- a/gjs/jsapi-util.cpp
++++ b/gjs/jsapi-util.cpp
+@@ -1284,13 +1284,8 @@ gjs_strip_unix_shebang(const char  *script,
+         const char *s = (const char *) strstr (script, "\n");
+         if (s != NULL) {
+             if (*script_len > 0)
+-                *script_len -= (s + 1 - script);
+-            script = s + 1;
+-
+-            if (start_line_number_out)
+-                *start_line_number_out = 2;
+-
+-            return script;
++                *script_len -= (s - script);
++            script = s;
+         } else {
+             /* Just a shebang */
+             if (start_line_number_out)
+@@ -1340,7 +1335,7 @@ gjs_eval_with_scope(JSContext    *context,
+     JS::CompileOptions options(context);
+     options.setUTF8(true)
+            .setFileAndLine(filename, start_line_number)
+-           .setSourcePolicy(JS::CompileOptions::LAZY_SOURCE);
++           .setSourcePolicy(JS::CompileOptions::SAVE_SOURCE);
+ 
+     js::RootedObject rootedObj(context, object);
+ 
+-- 
+2.0.5
+

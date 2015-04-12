@@ -9,7 +9,6 @@ inherit eutils gnome2 pax-utils virtualx
 
 DESCRIPTION="Javascript bindings for GNOME"
 HOMEPAGE="https://wiki.gnome.org/Projects/Gjs"
-SRC_URI="http://github.com/swojtasiak/jsrdbg-archive/raw/master/${P}-jsrdbg.tar.xz"
 
 LICENSE="MIT || ( MPL-1.1 LGPL-2+ GPL-2+ )"
 SLOT="0"
@@ -36,6 +35,9 @@ DEPEND="${RDEPEND}
 src_prepare() {
 	# Disable broken unittests
 	epatch "${FILESDIR}"/${PN}-1.42.0-disable-unittest-*.patch
+
+	# JSRDBG integration.
+	epatch "${FILESDIR}"/${PN}-1.42.0-jsrdbg.patch
 
 	gnome2_src_prepare
 }
