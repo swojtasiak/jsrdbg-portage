@@ -131,7 +131,7 @@ src_prepare() {
 	epatch "${FILESDIR}"/${PN}-3.14.0-bluetooth-gold.patch
 
 	# Integration with JSRDBG.
-	epatch "${FILESDIR}"/${PN}-3.14.3-gentoo-jsrdbg.patch
+	epatch "${FILESDIR}"/${PN}-3.14.3-jsrdbg.patch
 
 	epatch_user
 

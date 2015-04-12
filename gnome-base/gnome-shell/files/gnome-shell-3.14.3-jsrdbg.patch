@@ -1,42 +1,12 @@
-From 4a3b9e295f89051086216055a41a343f4371e939 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?S=C5=82awomir=20Wojtasiak?=
- <slawomir.wojtasiak@swksoftware.pl>
-Date: Sun, 12 Apr 2015 17:43:28 +0200
-Subject: [PATCH] gnome-shell - jsrdbg integration.
+From 7e43c73ebb901b2b5fb1feae93519809ca5898e0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?S=C5=82awomir=20Wojtasiak?= <slawomir@wojtasiak.com>
+Date: Sun, 12 Apr 2015 19:00:19 +0200
+Subject: [PATCH] gnome-shell - jsrgbd integration.
 
 ---
- configure.ac       |  1 +
- src/Makefile.am    |  4 +--
  src/shell-global.c | 96 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 99 insertions(+), 2 deletions(-)
+ 1 file changed, 96 insertions(+)
 
-diff --git a/configure.ac b/configure.ac
-index 03839c7..d20395d 100644
---- a/configure.ac
-+++ b/configure.ac
-@@ -121,6 +121,7 @@ PKG_CHECK_MODULES(TRAY, gtk+-3.0)
- PKG_CHECK_MODULES(GVC, libpulse >= $PULSE_MIN_VERS libpulse-mainloop-glib gobject-2.0)
- PKG_CHECK_MODULES(DESKTOP_SCHEMAS, gsettings-desktop-schemas >= 3.7.4)
- PKG_CHECK_MODULES(CARIBOU, caribou-1.0 >= 0.4.8)
-+PKG_CHECK_MODULES(JSRDBG, libjsrdbg >= 0.0.2)
- 
- AC_ARG_ENABLE(browser-plugin,
-               [AS_HELP_STRING([--enable-browser-plugin],
-diff --git a/src/Makefile.am b/src/Makefile.am
-index c8fd46f..94ce3e9 100644
---- a/src/Makefile.am
-+++ b/src/Makefile.am
-@@ -315,8 +315,8 @@ libgnome_shell_base_la_LIBADD = $(libgnome_shell_libadd)
- libgnome_shell_base_la_CPPFLAGS = $(gnome_shell_cflags)
- 
- libgnome_shell_la_LDFLAGS = $(libgnome_shell_ldflags)
--libgnome_shell_la_LIBADD = $(GNOME_SHELL_LIBS) $(MUTTER_LIBS) $(BLUETOOTH_LIBS) libgnome-shell-base.la
--libgnome_shell_la_CPPFLAGS = $(MUTTER_CFLAGS) $(gnome_shell_cflags)
-+libgnome_shell_la_LIBADD = $(GNOME_SHELL_LIBS) $(MUTTER_LIBS) $(JSRDBG_LIBS) $(BLUETOOTH_LIBS) libgnome-shell-base.la
-+libgnome_shell_la_CPPFLAGS = $(MUTTER_CFLAGS) $(JSRDBG_CFLAGS) $(gnome_shell_cflags)
- 
- ShellMenu-0.1.gir: libgnome-shell-menu.la
- ShellMenu_0_1_gir_INCLUDES = Gio-2.0
 diff --git a/src/shell-global.c b/src/shell-global.c
 index d90ceaf..b861968 100644
 --- a/src/shell-global.c
