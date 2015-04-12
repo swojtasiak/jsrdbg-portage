@@ -32,9 +32,9 @@ Finally, we can make layman aware of our overlay:
 
 This overlay consists of the following packages:
 
- * dev-libs/jsrdbg - JavaScript remote debugger library for SpiderMonkey engine.
- * dev-libs/gjs - Gnome3/GJS integrated with JSRDbg.
- * gnome-base/gnome-shell - Gnome3 Shell integrated with JSRDbg.
+ * **dev-libs/jsrdbg** - JavaScript remote debugger library for SpiderMonkey engine.
+ * **dev-libs/gjs** - Gnome3/GJS integrated with JSRDbg.
+ * **gnome-base/gnome-shell** - Gnome3 Shell integrated with JSRDbg.
 
 Remember that there are dependencies between these packages, therefore it is fairly impossible to install gnome-shell without for instance GJS library. Mostly because it is GJS that exposes higher level debugger abstraction for gnome-shell, so there is only transitive dependency between JSRDbg and gnome-shell. Similarly the GJS depends on JSRDbg directly in order to provide implementation of the abstraction.
 
