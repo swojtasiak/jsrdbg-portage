@@ -39,6 +39,8 @@ src_prepare() {
 	# JSRDBG integration.
 	epatch "${FILESDIR}"/${PN}-1.42.0-jsrdbg.patch
 
+	eautoreconf
+
 	gnome2_src_prepare
 }
 
