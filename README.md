@@ -81,5 +81,4 @@ Full documentation of the JSRDbg is available [here](https://github.com/swojtasi
 
 Have fun!
 
-Everything here is licensed under LGPL and GPL licenses.
 
