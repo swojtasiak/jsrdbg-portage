@@ -1,4 +1,4 @@
-From 03b6d5e1198237bdd0b1aa0a77ef458819b3cc13 Mon Sep 17 00:00:00 2001
+From 06a87a34dfb67aa43f756403793c93588e2e377d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?S=C5=82awomir=20Wojtasiak?= <slawomir@wojtasiak.com>
 Date: Sun, 12 Apr 2015 11:28:53 +0200
 Subject: [PATCH] gjs - jsrdbg integration
@@ -221,7 +221,7 @@ index ccd8bc6..394ae22 100644
  void            gjs_context_maybe_gc              (GjsContext  *context);
 diff --git a/gjs/debugger.cpp b/gjs/debugger.cpp
 new file mode 100644
-index 0000000..c6e8309
+index 0000000..820485b
 --- /dev/null
 +++ b/gjs/debugger.cpp
 @@ -0,0 +1,275 @@
@@ -288,7 +288,7 @@ index 0000000..c6e8309
 +static void
 +gjs_debugger_init(GjsDebugger *js_debugger)
 +{
-+    js_debugger->host = NULL;
++    js_debugger->host = JSR_DEFAULT_TCP_BINDING_IP;
 +    js_debugger->port = JSR_DEFAULT_TCP_PORT;
 +    js_debugger->debugger = NULL;
 +}
@@ -347,7 +347,7 @@ index 0000000..c6e8309
 +    /* Creates debugger */
 +    JSRemoteDebuggerCfg cfg;
 +    cfg.setProtocol( JSRemoteDebuggerCfg::PROTOCOL_TCP_IP );
-+    cfg.setTcpHost( js_debugger->host );
++    cfg.setTcpHost( js_debugger->host ? js_debugger->host : JSR_DEFAULT_TCP_BINDING_IP );
 +    cfg.setTcpPort( js_debugger->port );
 +
 +    js_debugger->debugger = new JSRemoteDebugger( cfg );

@@ -44,8 +44,8 @@ Integration patches are quite simple and non-invasive, so it should be relative 
 
 They can be also found dirrectly on the GitHub:
 
-* [gjs - 1.42.0](https://github.com/swojtasiak/gjs/commit/03b6d5e1198237bdd0b1aa0a77ef458819b3cc13) - Integration for GJS 1.42.0. This patch has been well tested and is currently used by the GJS overlay.
-* [gjs - master](https://github.com/swojtasiak/gjs/commit/12a8ea776a808793cb48d36cc725bc7c37c8157d) - Current GJS version (master) patched using the same code. It should work, but I haven't tested it yet.
+* [gjs - 1.42.0](https://github.com/swojtasiak/gjs/commit/06a87a34dfb67aa43f756403793c93588e2e377d) - Integration for GJS 1.42.0. This patch has been well tested and is currently used by the GJS overlay.
+* [gjs - master](https://github.com/swojtasiak/gjs/commit/391de095ec5345af0b95c8f7586b09a15037da66) - Current GJS version (master) patched using the same code. It should work, but I haven't tested it yet.
 * [gnome-shell - 3.14.3](https://github.com/swojtasiak/gnome-shell/commit/ca4412d20a9975211bc4cc51609f2325cda8f132) - Integration for gnome-shell 3.14.3. This patch has been well tested and is currently used by the gnome-shell overlay.
 * [gnome-shell - master](https://github.com/swojtasiak/gnome-shell/commit/154244e0c4c463d006214f404bc4026ef20fbe67) - Current gnome-shell version (master) patched using the same code. It should work, but I haven't tested it yet.
 
